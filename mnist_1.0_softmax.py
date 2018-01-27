@@ -23,13 +23,13 @@ tf.set_random_seed(0)
 # neural network with 5 layers
 #
 # · · · · · · · · · ·          (input data, flattened pixels)       X [batch, 784]   # 784 = 28*28
-# \x/x\x/x\x/x\x/x\x/       -- fully connected layer (relu)         W1 [784, 200]      B1[200]
+# \x/x\x/x\x/x\x/x\x/ ✞     -- fully connected layer (relu+dropout) W1 [784, 200]      B1[200]
 #  · · · · · · · · ·                                                Y1 [batch, 200]
-#   \x/x\x/x\x/x\x/         -- fully connected layer (relu)         W2 [200, 100]      B2[100]
+#   \x/x\x/x\x/x\x/ ✞       -- fully connected layer (relu+dropout) W2 [200, 100]      B2[100]
 #    · · · · · · ·                                                  Y2 [batch, 100]
-#     \x/x\x/x\x/           -- fully connected layer (relu)         W3 [100, 60]       B3[60]
+#     \x/x\x/x\x/ ✞         -- fully connected layer (relu+dropout) W3 [100, 60]       B3[60]
 #      · · · · ·                                                    Y3 [batch, 60]
-#       \x/x\x/             -- fully connected layer (relu)         W4 [60, 30]        B4[30]
+#       \x/x\x/ ✞           -- fully connected layer (relu+dropout) W4 [60, 30]        B4[30]
 #        · · ·                                                      Y4 [batch, 30]
 #         \x/               -- fully connected layer (softmax)      W5 [30, 10]        B5[10]
 #          ·                                                        Y5 [batch, 10]
@@ -43,6 +43,8 @@ X = tf.placeholder(tf.float32, [None, 28, 28, 1])
 Y_ = tf.placeholder(tf.float32, [None, 10])
 # variable learning rate
 lr = tf.placeholder(tf.float32)
+# Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.75 at training time
+pkeep = tf.placeholder(tf.float32)
 
 # five layers and their number of neurons (tha last layer has 10 softmax neurons)
 L = 200
@@ -62,13 +64,22 @@ B4 = tf.Variable(tf.ones([O])/10)
 W5 = tf.Variable(tf.truncated_normal([O, 10], stddev=0.1))
 B5 = tf.Variable(tf.zeros([10]))
 
-# The model
-XX = tf.reshape(X, [-1, 784])
+# The model, with dropout at each layer
+XX = tf.reshape(X, [-1, 28*28])
+
 Y1 = tf.nn.relu(tf.matmul(XX, W1) + B1)
-Y2 = tf.nn.relu(tf.matmul(Y1, W2) + B2)
-Y3 = tf.nn.relu(tf.matmul(Y2, W3) + B3)
-Y4 = tf.nn.relu(tf.matmul(Y3, W4) + B4)
-Ylogits = tf.matmul(Y4, W5) + B5
+Y1d = tf.nn.dropout(Y1, pkeep)
+
+Y2 = tf.nn.relu(tf.matmul(Y1d, W2) + B2)
+Y2d = tf.nn.dropout(Y2, pkeep)
+
+Y3 = tf.nn.relu(tf.matmul(Y2d, W3) + B3)
+Y3d = tf.nn.dropout(Y3, pkeep)
+
+Y4 = tf.nn.relu(tf.matmul(Y3d, W4) + B4)
+Y4d = tf.nn.dropout(Y4, pkeep)
+
+Ylogits = tf.matmul(Y4d, W5) + B5
 Y = tf.nn.softmax(Ylogits)
 
 # cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 100  images
@@ -111,7 +122,7 @@ def training_step(i, update_test_data, update_train_data):
 
     # compute training values for visualisation
     if update_train_data:
-        a, c, im, w, b = sess.run([accuracy, cross_entropy, I, allweights, allbiases], {X: batch_X, Y_: batch_Y})
+        a, c, im, w, b = sess.run([accuracy, cross_entropy, I, allweights, allbiases], {X: batch_X, Y_: batch_Y, pkeep: 1.0})
         print(str(i) + ": accuracy:" + str(a) + " loss: " + str(c) + " (lr:" + str(learning_rate) + ")")
         datavis.append_training_curves_data(i, a, c)
         datavis.update_image1(im)
@@ -119,13 +130,13 @@ def training_step(i, update_test_data, update_train_data):
 
     # compute test values for visualisation
     if update_test_data:
-        a, c, im = sess.run([accuracy, cross_entropy, It], {X: mnist.test.images, Y_: mnist.test.labels})
+        a, c, im = sess.run([accuracy, cross_entropy, It], {X: mnist.test.images, Y_: mnist.test.labels, pkeep: 1.0})
         print(str(i) + ": ********* epoch " + str(i*100//mnist.train.images.shape[0]+1) + " ********* test accuracy:" + str(a) + " test loss: " + str(c))
         datavis.append_test_curves_data(i, a, c)
         datavis.update_image2(im)
 
     # the backpropagation training step
-    sess.run(train_step, {X: batch_X, Y_: batch_Y, lr: learning_rate})
+    sess.run(train_step, {X: batch_X, Y_: batch_Y, pkeep: 0.75, lr: learning_rate})
 
 datavis.animate(training_step, iterations=10000+1, train_data_update_freq=20, test_data_update_freq=100, more_tests_at_start=True)
 
@@ -139,13 +150,18 @@ print("max test accuracy: " + str(datavis.get_max_test_accuracy()))
 # (In all runs, if sigmoids are used, all biases are initialised at 0, if RELUs are used,
 # all biases are initialised at 0.1 apart from the last one which is initialised at 0.)
 
-## learning rate = 0.003, 10K iterations
+## test with and without dropout, decaying learning rate from 0.003 to 0.0001 decay_speed 2000, 10K iterations
+# final test accuracy = 0.9817 (relu, dropout 0.75, training cross-entropy still a bit noisy, test cross-entropy stable, test accuracy stable just under 98.2)
+# final test accuracy = 0.9824 (relu, no dropout, training cross-entropy down to 0, test cross-entropy goes up significantly, test accuracy stable around 98.2)
+
+## learning rate = 0.003, 10K iterations, no dropout
 # final test accuracy = 0.9788 (sigmoid - slow start, training cross-entropy not stabilised in the end)
 # final test accuracy = 0.9825 (relu - above 0.97 in the first 1500 iterations but noisy curves)
 
-## now with learning rate = 0.0001, 10K iterations
+## now with learning rate = 0.0001, 10K iterations, no dropout
 # final test accuracy = 0.9722 (relu - slow but smooth curve, would have gone higher in 20K iterations)
 
-## decaying learning rate from 0.003 to 0.0001 decay_speed 2000, 10K iterations
+## decaying learning rate from 0.003 to 0.0001 decay_speed 2000, 10K iterations, no dropout
 # final test accuracy = 0.9746 (sigmoid - training cross-entropy not stabilised)
-# final test accuracy = 0.9824 (relu - training set fully learned, test accuracy stable)
+# final test accuracy = 0.9824 (relu, training cross-entropy down to 0, test cross-entropy goes up significantly, test accuracy stable around 98.2)
+# on another run, peak at 0.9836
