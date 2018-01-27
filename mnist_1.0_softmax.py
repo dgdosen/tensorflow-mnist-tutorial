@@ -20,22 +20,22 @@ from tensorflow.examples.tutorials.mnist import input_data as mnist_data
 print("Tensorflow version " + tf.__version__)
 tf.set_random_seed(0)
 
-# neural network with 5 layers
-#
-# · · · · · · · · · ·          (input data, flattened pixels)       X [batch, 784]   # 784 = 28*28
-# \x/x\x/x\x/x\x/x\x/ ✞     -- fully connected layer (relu+dropout) W1 [784, 200]      B1[200]
-#  · · · · · · · · ·                                                Y1 [batch, 200]
-#   \x/x\x/x\x/x\x/ ✞       -- fully connected layer (relu+dropout) W2 [200, 100]      B2[100]
-#    · · · · · · ·                                                  Y2 [batch, 100]
-#     \x/x\x/x\x/ ✞         -- fully connected layer (relu+dropout) W3 [100, 60]       B3[60]
-#      · · · · ·                                                    Y3 [batch, 60]
-#       \x/x\x/ ✞           -- fully connected layer (relu+dropout) W4 [60, 30]        B4[30]
-#        · · ·                                                      Y4 [batch, 30]
-#         \x/               -- fully connected layer (softmax)      W5 [30, 10]        B5[10]
-#          ·                                                        Y5 [batch, 10]
-
 # Download images and labels into mnist.test (10K images+labels) and mnist.train (60K images+labels)
 mnist = mnist_data.read_data_sets("data", one_hot=True, reshape=False, validation_size=0)
+
+# neural network structure for this sample:
+#
+# · · · · · · · · · ·      (input data, 1-deep)                 X [batch, 28, 28, 1]
+# @ @ @ @ @ @ @ @ @ @   -- conv. layer 5x5x1=>4 stride 1        W1 [5, 5, 1, 4]        B1 [4]
+# ∶∶∶∶∶∶∶∶∶∶∶∶∶∶∶∶∶∶∶                                           Y1 [batch, 28, 28, 4]
+#   @ @ @ @ @ @ @ @     -- conv. layer 5x5x4=>8 stride 2        W2 [5, 5, 4, 8]        B2 [8]
+#   ∶∶∶∶∶∶∶∶∶∶∶∶∶∶∶                                             Y2 [batch, 14, 14, 8]
+#     @ @ @ @ @ @       -- conv. layer 4x4x8=>12 stride 2       W3 [4, 4, 8, 12]       B3 [12]
+#     ∶∶∶∶∶∶∶∶∶∶∶                                               Y3 [batch, 7, 7, 12] => reshaped to YY [batch, 7*7*12]
+#      \x/x\x\x/        -- fully connected layer (relu)         W4 [7*7*12, 200]       B4 [200]
+#       · · · ·                                                 Y4 [batch, 200]
+#       \x/x\x/         -- fully connected layer (softmax)      W5 [200, 10]           B5 [10]
+#        · · ·                                                  Y [batch, 10]
 
 # input X: 28x28 grayscale images, the first dimension (None) will index the images in the mini-batch
 X = tf.placeholder(tf.float32, [None, 28, 28, 1])
@@ -43,43 +43,39 @@ X = tf.placeholder(tf.float32, [None, 28, 28, 1])
 Y_ = tf.placeholder(tf.float32, [None, 10])
 # variable learning rate
 lr = tf.placeholder(tf.float32)
-# Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.75 at training time
-pkeep = tf.placeholder(tf.float32)
 
-# five layers and their number of neurons (tha last layer has 10 softmax neurons)
-L = 200
-M = 100
-N = 60
-O = 30
-# Weights initialised with small random values between -0.2 and +0.2
-# When using RELUs, make sure biases are initialised with small *positive* values for example 0.1 = tf.ones([K])/10
-W1 = tf.Variable(tf.truncated_normal([784, L], stddev=0.1))  # 784 = 28 * 28
-B1 = tf.Variable(tf.ones([L])/10)
-W2 = tf.Variable(tf.truncated_normal([L, M], stddev=0.1))
-B2 = tf.Variable(tf.ones([M])/10)
-W3 = tf.Variable(tf.truncated_normal([M, N], stddev=0.1))
-B3 = tf.Variable(tf.ones([N])/10)
-W4 = tf.Variable(tf.truncated_normal([N, O], stddev=0.1))
-B4 = tf.Variable(tf.ones([O])/10)
-W5 = tf.Variable(tf.truncated_normal([O, 10], stddev=0.1))
-B5 = tf.Variable(tf.zeros([10]))
+# three convolutional layers with their channel counts, and a
+# fully connected layer (tha last layer has 10 softmax neurons)
+K = 4  # first convolutional layer output depth
+L = 8  # second convolutional layer output depth
+M = 12  # third convolutional layer
+N = 200  # fully connected layer
 
-# The model, with dropout at each layer
-XX = tf.reshape(X, [-1, 28*28])
+W1 = tf.Variable(tf.truncated_normal([5, 5, 1, K], stddev=0.1))  # 5x5 patch, 1 input channel, K output channels
+B1 = tf.Variable(tf.ones([K])/10)
+W2 = tf.Variable(tf.truncated_normal([5, 5, K, L], stddev=0.1))
+B2 = tf.Variable(tf.ones([L])/10)
+W3 = tf.Variable(tf.truncated_normal([4, 4, L, M], stddev=0.1))
+B3 = tf.Variable(tf.ones([M])/10)
 
-Y1 = tf.nn.relu(tf.matmul(XX, W1) + B1)
-Y1d = tf.nn.dropout(Y1, pkeep)
+W4 = tf.Variable(tf.truncated_normal([7 * 7 * M, N], stddev=0.1))
+B4 = tf.Variable(tf.ones([N])/10)
+W5 = tf.Variable(tf.truncated_normal([N, 10], stddev=0.1))
+B5 = tf.Variable(tf.ones([10])/10)
 
-Y2 = tf.nn.relu(tf.matmul(Y1d, W2) + B2)
-Y2d = tf.nn.dropout(Y2, pkeep)
+# The model
+stride = 1  # output is 28x28
+Y1 = tf.nn.relu(tf.nn.conv2d(X, W1, strides=[1, stride, stride, 1], padding='SAME') + B1)
+stride = 2  # output is 14x14
+Y2 = tf.nn.relu(tf.nn.conv2d(Y1, W2, strides=[1, stride, stride, 1], padding='SAME') + B2)
+stride = 2  # output is 7x7
+Y3 = tf.nn.relu(tf.nn.conv2d(Y2, W3, strides=[1, stride, stride, 1], padding='SAME') + B3)
 
-Y3 = tf.nn.relu(tf.matmul(Y2d, W3) + B3)
-Y3d = tf.nn.dropout(Y3, pkeep)
+# reshape the output from the third convolution for the fully connected layer
+YY = tf.reshape(Y3, shape=[-1, 7 * 7 * M])
 
-Y4 = tf.nn.relu(tf.matmul(Y3d, W4) + B4)
-Y4d = tf.nn.dropout(Y4, pkeep)
-
-Ylogits = tf.matmul(Y4d, W5) + B5
+Y4 = tf.nn.relu(tf.matmul(YY, W4) + B4)
+Ylogits = tf.matmul(Y4, W5) + B5
 Y = tf.nn.softmax(Ylogits)
 
 # cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 100  images
@@ -107,7 +103,6 @@ init = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init)
 
-
 # You can call this function in a loop to train the model, 100 images at a time
 def training_step(i, update_test_data, update_train_data):
 
@@ -117,12 +112,12 @@ def training_step(i, update_test_data, update_train_data):
     # learning rate decay
     max_learning_rate = 0.003
     min_learning_rate = 0.0001
-    decay_speed = 2000.0 # 0.003-0.0001-2000=>0.9826 done in 5000 iterations
+    decay_speed = 2000.0
     learning_rate = min_learning_rate + (max_learning_rate - min_learning_rate) * math.exp(-i/decay_speed)
 
     # compute training values for visualisation
     if update_train_data:
-        a, c, im, w, b = sess.run([accuracy, cross_entropy, I, allweights, allbiases], {X: batch_X, Y_: batch_Y, pkeep: 1.0})
+        a, c, im, w, b = sess.run([accuracy, cross_entropy, I, allweights, allbiases], {X: batch_X, Y_: batch_Y})
         print(str(i) + ": accuracy:" + str(a) + " loss: " + str(c) + " (lr:" + str(learning_rate) + ")")
         datavis.append_training_curves_data(i, a, c)
         datavis.update_image1(im)
@@ -130,15 +125,15 @@ def training_step(i, update_test_data, update_train_data):
 
     # compute test values for visualisation
     if update_test_data:
-        a, c, im = sess.run([accuracy, cross_entropy, It], {X: mnist.test.images, Y_: mnist.test.labels, pkeep: 1.0})
+        a, c, im = sess.run([accuracy, cross_entropy, It], {X: mnist.test.images, Y_: mnist.test.labels})
         print(str(i) + ": ********* epoch " + str(i*100//mnist.train.images.shape[0]+1) + " ********* test accuracy:" + str(a) + " test loss: " + str(c))
         datavis.append_test_curves_data(i, a, c)
         datavis.update_image2(im)
 
     # the backpropagation training step
-    sess.run(train_step, {X: batch_X, Y_: batch_Y, pkeep: 0.75, lr: learning_rate})
+    sess.run(train_step, {X: batch_X, Y_: batch_Y, lr: learning_rate})
 
-datavis.animate(training_step, iterations=10000+1, train_data_update_freq=20, test_data_update_freq=100, more_tests_at_start=True)
+datavis.animate(training_step, 10001, train_data_update_freq=10, test_data_update_freq=100)
 
 # to save the animation as a movie, add save_movie=True as an argument to datavis.animate
 # to disable the visualisation use the following line instead of the datavis.animate line
@@ -146,22 +141,13 @@ datavis.animate(training_step, iterations=10000+1, train_data_update_freq=20, te
 
 print("max test accuracy: " + str(datavis.get_max_test_accuracy()))
 
-# Some results to expect:
-# (In all runs, if sigmoids are used, all biases are initialised at 0, if RELUs are used,
-# all biases are initialised at 0.1 apart from the last one which is initialised at 0.)
-
-## test with and without dropout, decaying learning rate from 0.003 to 0.0001 decay_speed 2000, 10K iterations
-# final test accuracy = 0.9817 (relu, dropout 0.75, training cross-entropy still a bit noisy, test cross-entropy stable, test accuracy stable just under 98.2)
-# final test accuracy = 0.9824 (relu, no dropout, training cross-entropy down to 0, test cross-entropy goes up significantly, test accuracy stable around 98.2)
-
-## learning rate = 0.003, 10K iterations, no dropout
-# final test accuracy = 0.9788 (sigmoid - slow start, training cross-entropy not stabilised in the end)
-# final test accuracy = 0.9825 (relu - above 0.97 in the first 1500 iterations but noisy curves)
-
-## now with learning rate = 0.0001, 10K iterations, no dropout
-# final test accuracy = 0.9722 (relu - slow but smooth curve, would have gone higher in 20K iterations)
-
-## decaying learning rate from 0.003 to 0.0001 decay_speed 2000, 10K iterations, no dropout
-# final test accuracy = 0.9746 (sigmoid - training cross-entropy not stabilised)
-# final test accuracy = 0.9824 (relu, training cross-entropy down to 0, test cross-entropy goes up significantly, test accuracy stable around 98.2)
-# on another run, peak at 0.9836
+# layers 4 8 12 200, patches 5x5str1 5x5str2 4x4str2 best 0.989 after 10000 iterations
+# layers 4 8 12 200, patches 5x5str1 4x4str2 4x4str2 best 0.9892 after 10000 iterations
+# layers 6 12 24 200, patches 5x5str1 4x4str2 4x4str2 best 0.9908 after 10000 iterations but going downhill from 5000 on
+# layers 6 12 24 200, patches 5x5str1 4x4str2 4x4str2 dropout=0.75 best 0.9922 after 10000 iterations (but above 0.99 after 1400 iterations only)
+# layers 4 8 12 200, patches 5x5str1 4x4str2 4x4str2 dropout=0.75, best 0.9914 at 13700 iterations
+# layers 9 16 25 200, patches 5x5str1 4x4str2 4x4str2 dropout=0.75, best 0.9918 at 10500 (but 0.99 at 1500 iterations already, 0.9915 at 5800)
+# layers 9 16 25 300, patches 5x5str1 4x4str2 4x4str2 dropout=0.75, best 0.9916 at 5500 iterations (but 0.9903 at 1200 iterations already)
+# attempts with 2 fully-connected layers: no better 300 and 100 neurons, dropout 0.75 and 0.5, 6x6 5x5 4x4 patches no better
+#*layers 6 12 24 200, patches 6x6str1 5x5str2 4x4str2 dropout=0.75 best 0.9928 after 12800 iterations (but consistently above 0.99 after 1300 iterations only, 0.9916 at 2300 iterations, 0.9921 at 5600, 0.9925 at 20000)
+# layers 6 12 24 200, patches 6x6str1 5x5str2 4x4str2 no dropout best 0.9906 after 3100 iterations (avove 0.99 from iteration 1400)
